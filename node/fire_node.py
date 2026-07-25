@@ -31,6 +31,17 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(message)s
 HYSTERESIS_MARGIN = 0.05
 MIN_DWELL_MS = 500
 
+# Republish the LED state only when (color, direction, state) actually
+# changes, plus this periodic keepalive so the retained topic never goes
+# more than this long without a fresh publish (matters for a late-joining
+# dashboard and for the latency instrumentation, which needs a recent ts).
+LED_KEEPALIVE_S = 5.0
+
+# Safety net: cap paho-mqtt's outgoing queue so a future republish-volume
+# bug degrades (drops messages once the queue is full) instead of growing
+# this client's outgoing queue without bound.
+MAX_QUEUED_MESSAGES = 100
+
 # --- Fail-safe constants ---
 SENSOR_TIMEOUT_S = 5.0
 HEALTH_PUBLISH_INTERVAL_S = 2.0
@@ -69,10 +80,20 @@ class FireNode:
         self._displayed_route_cost = None
         self._last_change_ts = 0.0
 
+        # Last (color, direction, state) actually published, and when — used
+        # to only republish the LED topic on real change or keepalive.
+        self._last_published_led = None
+        self._last_led_publish_ts = 0.0
+
         self._degraded = False
         self._stopping = False
 
+        # TEMPORARY DIAGNOSTIC — remove once the republish-volume leak is fixed.
+        self._led_publish_count = 0
+        self._routing_messages_received = 0
+
         self._client = mqtt.Client(client_id=f"fire_node_{zone_id}")
+        self._client.max_queued_messages_set(MAX_QUEUED_MESSAGES)
         will_payload = json.dumps({"state": "offline", "ts": time.time()})
         self._client.will_set(
             TOPIC_HEALTH.format(zone_id=zone_id), will_payload, qos=0, retain=True
@@ -145,6 +166,7 @@ class FireNode:
             self.log.warning("discarding malformed routing payload: %r", payload)
             return
 
+        self._routing_messages_received += 1  # TEMPORARY DIAGNOSTIC
         self._apply_routing(hazard_costs, dist_to_exit, next_hop_map, src_ts)
 
     # -- Routing (local: hysteresis + color only, no graph solve) ----------------------------------------------------
@@ -177,7 +199,25 @@ class FireNode:
             state = "normal"
             color = rc.color_for_cost(self._own_cost, flame=self._own_flame)
 
+        self._publish_led_if_needed(color, direction, state, src_ts)
+
+    def _publish_led_if_needed(self, color, direction, state, src_ts):
+        """Only hit the broker when (color, direction, state) actually
+        changes, plus a periodic keepalive so the retained LED topic never
+        goes stale. Republishing unconditionally on every routing broadcast
+        was the O(zones) fan-out that produced 36x more LED publishes than
+        zones actually changing — see docs/PROJECT_SPEC.md / run history."""
+        current = (color, direction, state)
+        now = time.time()
+        changed = current != self._last_published_led
+        keepalive_due = (now - self._last_led_publish_ts) >= LED_KEEPALIVE_S
+
+        if not (changed or keepalive_due):
+            return
+
         self._publish_led(color, direction, state, src_ts)
+        self._last_published_led = current
+        self._last_led_publish_ts = now
 
     def _apply_hysteresis(self, candidate_hop, candidate_cost, neighbor_costs, dist_to_exit):
         now = time.time()
@@ -242,6 +282,7 @@ class FireNode:
         )
 
     def _publish_led(self, color, direction, state, src_ts):
+        self._led_publish_count += 1  # TEMPORARY DIAGNOSTIC
         payload = json.dumps(
             {
                 "color": color,

@@ -37,6 +37,11 @@ TOPIC_HAZARD_WILDCARD = "fire/nodes/+/hazard"
 TOPIC_ROUTING = "fire/system/routing"
 TOPIC_HEALTH = "fire/system/health/coordinator"
 
+# Safety net: cap paho-mqtt's outgoing queue so a future republish-volume
+# bug degrades (drops messages once the queue is full) instead of growing
+# this client's outgoing queue without bound.
+MAX_QUEUED_MESSAGES = 100
+
 
 class RoutingCoordinator:
     def __init__(self, broker_host="localhost", broker_port=1883):
@@ -52,7 +57,11 @@ class RoutingCoordinator:
         # Global hazard vector — this is the ONLY place it needs to live now.
         self._hazard_costs = {z: rc.BASELINE_COST for z in self.graph.nodes}
 
+        # TEMPORARY DIAGNOSTIC — remove once the republish-volume leak is fixed.
+        self._recompute_count = 0
+
         self._client = mqtt.Client(client_id="routing_coordinator")
+        self._client.max_queued_messages_set(MAX_QUEUED_MESSAGES)
         will_payload = json.dumps({"state": "offline", "ts": time.time()})
         self._client.will_set(TOPIC_HEALTH, will_payload, qos=0, retain=True)
         self._client.on_connect = self._on_connect
@@ -100,6 +109,7 @@ class RoutingCoordinator:
     # -- Recompute + broadcast ----------------------------------------------------
 
     def _recompute_and_publish(self, src_ts):
+        self._recompute_count += 1  # TEMPORARY DIAGNOSTIC
         with self._lock:
             hazard_costs = dict(self._hazard_costs)
 
