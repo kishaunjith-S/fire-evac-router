@@ -352,6 +352,35 @@
   .log-line.sev-neutral { color: var(--text-primary); }
   .log-line.sev-dim { color: var(--text-dim); }
 
+  /* ---------- alarm indicator ---------- */
+  .alarm-indicator {
+    display: none;
+    align-items: center;
+    gap: 0.5em;
+    padding: 0.3em 0.8em;
+    border: 1px solid var(--danger);
+    color: var(--danger);
+    font-family: 'Archivo Narrow', sans-serif;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    font-weight: 700;
+    font-size: 0.8rem;
+    animation: alarmPulse 1s ease-in-out infinite;
+  }
+
+  .alarm-dot {
+    width: 8px;
+    height: 8px;
+    background: var(--danger);
+    display: inline-block;
+    flex-shrink: 0;
+  }
+
+  @keyframes alarmPulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.5; }
+  }
+
   /* ---------- responsive ---------- */
   @media (max-width: 900px) {
     #main-layout {
@@ -374,6 +403,9 @@
 <div id="app">
   <header id="topbar">
     <h1>Fire Evacuation Router</h1>
+    <div class="alarm-indicator" id="alarm-indicator">
+      <span class="alarm-dot"></span>Alarm active
+    </div>
     <div class="stats">
       <div class="stat">
         <span class="label"><span class="conn-dot" id="conn-dot"></span>Link</span>
@@ -441,6 +473,7 @@
   const latencyMaxEl = document.getElementById("latency-max");
   const logLinesEl = document.getElementById("log-lines");
   const selectedZoneBody = document.getElementById("selected-zone-body");
+  const alarmIndicatorEl = document.getElementById("alarm-indicator");
 
   const SVG_NS = "http://www.w3.org/2000/svg";
 
@@ -452,6 +485,11 @@
   let maxLatencyMs = 0;
   let logLineCount = 0;
   const MAX_LOG_LINES = 300;
+
+  // Zones currently in shelter_in_place -- the alarm indicator shows
+  // whenever this is non-empty; the audio alert only fires on the
+  // transition INTO this set for a given zone, not on every re-render.
+  const shelterZones = new Set();
 
   const DIRECTION_DEG = { N: 0, E: 90, S: 180, W: 270 };
 
@@ -726,6 +764,78 @@
     nodesOnlineEl.textContent = `${onlineCount} / ${total}`;
   }
 
+  // ---- audio distress alert (simulated buzzer/audio module) ----
+
+  let audioCtx = null;
+
+  function getAudioContext() {
+    const Ctx = window.AudioContext || window.webkitAudioContext;
+    if (!Ctx) return null;
+    if (!audioCtx) audioCtx = new Ctx();
+    if (audioCtx.state === "suspended") {
+      audioCtx.resume().catch(() => {});
+    }
+    return audioCtx;
+  }
+
+  function playAlarmTone() {
+    const ctx = getAudioContext();
+    if (!ctx) return;
+
+    const FREQ_HIGH = 1000;
+    const FREQ_LOW = 700;
+    const SEGMENT_S = 0.18;
+    const TOTAL_S = 1.6;
+    const GAIN = 0.15;
+
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.type = "square";
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+
+    const now = ctx.currentTime;
+    gain.gain.setValueAtTime(0, now);
+    gain.gain.linearRampToValueAtTime(GAIN, now + 0.02);
+
+    let t = now;
+    let high = true;
+    while (t < now + TOTAL_S) {
+      osc.frequency.setValueAtTime(high ? FREQ_HIGH : FREQ_LOW, t);
+      high = !high;
+      t += SEGMENT_S;
+    }
+
+    gain.gain.setValueAtTime(GAIN, now + TOTAL_S - 0.05);
+    gain.gain.linearRampToValueAtTime(0, now + TOTAL_S);
+
+    osc.start(now);
+    osc.stop(now + TOTAL_S + 0.05);
+  }
+
+  function updateAlarmIndicator() {
+    alarmIndicatorEl.style.display = shelterZones.size > 0 ? "flex" : "none";
+  }
+
+  // Called on every led event. Only plays the tone on the transition INTO
+  // shelter_in_place for this zone; the indicator itself just reflects
+  // current membership so it can also be correct on initial page load
+  // (where there's no "transition," a zone may just already be in that
+  // state from before this tab connected).
+  function handleShelterStateChange(zoneId, prevState, newState, playSound) {
+    const wasSheltering = shelterZones.has(zoneId);
+    const isSheltering = newState === "shelter_in_place";
+
+    if (isSheltering && !wasSheltering) {
+      shelterZones.add(zoneId);
+      if (playSound) playAlarmTone();
+      updateAlarmIndicator();
+    } else if (!isSheltering && wasSheltering) {
+      shelterZones.delete(zoneId);
+      updateAlarmIndicator();
+    }
+  }
+
   function severityFor(event) {
     if (event.type === "hazard") {
       if (event.cost >= 1000) return "danger";
@@ -775,10 +885,12 @@
         ripple(zoneId);
       }
     } else if (event.type === "led") {
+      const prevState = s.state;
       s.color = event.color;
       s.direction = event.direction;
       s.state = event.state;
       appendLog(zoneId, "led", `color=${event.color} dir=${event.direction || "-"} state=${event.state}`, sev);
+      handleShelterStateChange(zoneId, prevState, event.state, /* playSound */ true);
       if (event.src_ts) {
         const latencyMs = (event.ts - event.src_ts) * 1000;
         latencyLastEl.textContent = `${latencyMs.toFixed(0)} ms`;
@@ -831,6 +943,10 @@
           cost: z.cost, color: z.color, direction: z.direction,
           state: z.state, health: z.health, last_sensor: z.last_sensor,
         };
+        // Seed shelterZones from whatever's already true on load -- no
+        // "transition" happened here, so the indicator can reflect reality
+        // immediately but the alarm sound must stay silent.
+        handleShelterStateChange(zoneId, null, z.state, /* playSound */ false);
         updateZoneVisual(zoneId);
       });
       updateNodesOnlineStat();
