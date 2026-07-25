@@ -1,0 +1,795 @@
+<title>FIRE EVACUATION ROUTER — CONTROL PANEL</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Archivo+Narrow:wght@500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+
+<style>
+  :root {
+    --bg: #0B0D0F;
+    --panel-bg: #12151A;
+    --panel-bg-raised: #171B21;
+    --safe: #3ECF6E;
+    --caution: #FFB020;
+    --danger: #FF3B30;
+    --structural: #4A5568;
+    --text-primary: #E4E7EB;
+    --text-dim: #7C8794;
+    --border: #262B33;
+  }
+
+  * { box-sizing: border-box; }
+
+  html, body {
+    margin: 0;
+    padding: 0;
+    height: 100%;
+    background: var(--bg);
+    color: var(--text-primary);
+    font-family: 'JetBrains Mono', monospace;
+    overflow: hidden;
+  }
+
+  h1, h2, h3, .label {
+    font-family: 'Archivo Narrow', sans-serif;
+    letter-spacing: -0.01em;
+    text-transform: uppercase;
+    font-weight: 600;
+    color: var(--text-primary);
+    margin: 0;
+  }
+
+  button {
+    font-family: 'Archivo Narrow', sans-serif;
+    letter-spacing: -0.01em;
+    text-transform: uppercase;
+    font-weight: 600;
+    background: var(--panel-bg-raised);
+    color: var(--text-primary);
+    border: 1px solid var(--border);
+    border-radius: 0;
+    padding: 0.6em 1em;
+    cursor: pointer;
+    font-size: 0.85rem;
+  }
+
+  button:hover { border-color: var(--text-dim); }
+  button:active { background: #1D2229; }
+
+  button:focus-visible,
+  a:focus-visible,
+  .zone-group:focus-visible {
+    outline: 2px solid var(--safe);
+    outline-offset: 2px;
+  }
+
+  #app {
+    display: grid;
+    grid-template-rows: auto 1fr auto;
+    height: 100vh;
+    width: 100vw;
+  }
+
+  /* ---------- header ---------- */
+  #topbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0.7em 1.2em;
+    border-bottom: 1px solid var(--border);
+    background: var(--panel-bg);
+  }
+
+  #topbar h1 {
+    font-size: 1.15rem;
+    letter-spacing: 0.02em;
+  }
+
+  #topbar .stats {
+    display: flex;
+    gap: 1.6em;
+    align-items: center;
+  }
+
+  .stat {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    line-height: 1.1;
+  }
+
+  .stat .label {
+    font-size: 0.65rem;
+    color: var(--text-dim);
+  }
+
+  .stat .value {
+    font-size: 0.95rem;
+    font-weight: 700;
+  }
+
+  .conn-dot {
+    width: 9px;
+    height: 9px;
+    background: var(--structural);
+    display: inline-block;
+    margin-right: 0.5em;
+  }
+
+  .conn-dot.connected { background: var(--safe); }
+  .conn-dot.disconnected { background: var(--danger); animation: pulseDot 1s infinite; }
+
+  @keyframes pulseDot {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.3; }
+  }
+
+  /* ---------- main layout ---------- */
+  #main-layout {
+    display: grid;
+    grid-template-columns: 1fr 300px;
+    min-height: 0;
+  }
+
+  #grid-panel {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 1.2em;
+    min-width: 0;
+    min-height: 0;
+  }
+
+  #grid-svg {
+    width: 100%;
+    height: 100%;
+    max-width: min(88vh, 100%);
+    max-height: 100%;
+  }
+
+  .edge {
+    stroke: var(--structural);
+    stroke-width: 3;
+    opacity: 0.5;
+  }
+
+  .edge-pulse {
+    animation: edgePulse 0.55s ease-out;
+  }
+
+  @keyframes edgePulse {
+    0% { stroke: var(--danger); stroke-width: 11; opacity: 1; }
+    100% { stroke: var(--structural); stroke-width: 3; opacity: 0.5; }
+  }
+
+  .zone-rect {
+    fill: var(--structural);
+    stroke: var(--border);
+    stroke-width: 2;
+    transition: fill 220ms ease, stroke 220ms ease;
+    cursor: pointer;
+  }
+
+  .zone-group.selected .zone-rect {
+    stroke: var(--text-primary);
+    stroke-width: 3;
+  }
+
+  .zone-rect.color-green { fill: var(--safe); }
+  .zone-rect.color-yellow { fill: var(--caution); }
+  .zone-rect.color-red { fill: var(--danger); }
+
+  .zone-rect.health-degraded { stroke: var(--caution); stroke-dasharray: 6 4; }
+  .zone-rect.health-offline { stroke: var(--danger); stroke-dasharray: 6 4; opacity: 0.55; }
+
+  .zone-rect.color-red.pulsing {
+    animation: dangerPulse 1s ease-in-out infinite;
+  }
+
+  @keyframes dangerPulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.55; }
+  }
+
+  .cell-flash { animation: cellFlash 0.4s ease-out; }
+  @keyframes cellFlash {
+    0% { filter: brightness(2.4); }
+    100% { filter: brightness(1); }
+  }
+
+  .zone-label {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    fill: var(--bg);
+    opacity: 0.7;
+    pointer-events: none;
+    user-select: none;
+  }
+
+  .zone-cost {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 13px;
+    font-weight: 700;
+    fill: var(--bg);
+    pointer-events: none;
+    user-select: none;
+  }
+
+  .zone-arrow {
+    fill: var(--bg);
+    transition: transform 220ms ease;
+    transform-origin: center;
+    pointer-events: none;
+  }
+
+  .zone-exit-mark {
+    fill: none;
+    stroke: var(--text-primary);
+    stroke-width: 2;
+    pointer-events: none;
+  }
+
+  .zone-shelter-mark {
+    stroke: var(--bg);
+    stroke-width: 3;
+    pointer-events: none;
+  }
+
+  /* ---------- side panel ---------- */
+  #side-panel {
+    border-left: 1px solid var(--border);
+    background: var(--panel-bg);
+    padding: 1em;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 1.4em;
+  }
+
+  #side-panel h2 {
+    font-size: 0.85rem;
+    color: var(--text-dim);
+    margin-bottom: 0.6em;
+    border-bottom: 1px solid var(--border);
+    padding-bottom: 0.4em;
+  }
+
+  .field-row {
+    display: flex;
+    justify-content: space-between;
+    font-size: 0.85rem;
+    padding: 0.15em 0;
+  }
+
+  .field-row .k { color: var(--text-dim); }
+  .field-row .v { font-weight: 700; }
+
+  #zone-controls {
+    display: flex;
+    gap: 0.5em;
+    margin-top: 0.8em;
+  }
+
+  #zone-controls button { flex: 1; }
+
+  #btn-flashover { border-color: var(--danger); }
+  #btn-clear { border-color: var(--safe); }
+
+  .no-selection {
+    color: var(--text-dim);
+    font-size: 0.8rem;
+  }
+
+  .legend-row {
+    display: flex;
+    align-items: center;
+    gap: 0.6em;
+    font-size: 0.8rem;
+    padding: 0.2em 0;
+  }
+
+  .swatch {
+    width: 14px;
+    height: 14px;
+    flex-shrink: 0;
+  }
+
+  .swatch.safe { background: var(--safe); }
+  .swatch.caution { background: var(--caution); }
+  .swatch.danger { background: var(--danger); }
+  .swatch.structural { background: var(--structural); }
+  .swatch.degraded { background: var(--panel-bg-raised); border: 2px dashed var(--caution); }
+  .swatch.offline { background: var(--panel-bg-raised); border: 2px dashed var(--danger); }
+
+  /* ---------- telemetry log ---------- */
+  #telemetry-log {
+    border-top: 1px solid var(--border);
+    background: var(--panel-bg);
+    height: 160px;
+    display: flex;
+    flex-direction: column;
+  }
+
+  #telemetry-log h2 {
+    font-size: 0.7rem;
+    color: var(--text-dim);
+    padding: 0.4em 1em;
+    border-bottom: 1px solid var(--border);
+  }
+
+  #log-lines {
+    flex: 1;
+    overflow-y: auto;
+    padding: 0.4em 1em;
+    font-size: 0.78rem;
+    line-height: 1.5;
+  }
+
+  .log-line { white-space: pre; }
+  .log-line .ts { color: var(--text-dim); }
+  .log-line.sev-safe { color: var(--safe); }
+  .log-line.sev-caution { color: var(--caution); }
+  .log-line.sev-danger { color: var(--danger); }
+  .log-line.sev-neutral { color: var(--text-primary); }
+  .log-line.sev-dim { color: var(--text-dim); }
+
+  /* ---------- responsive ---------- */
+  @media (max-width: 900px) {
+    #main-layout {
+      grid-template-columns: 1fr;
+      grid-template-rows: 1fr auto;
+      overflow-y: auto;
+    }
+    #side-panel {
+      border-left: none;
+      border-top: 1px solid var(--border);
+      flex-direction: row;
+      flex-wrap: wrap;
+      max-height: 40vh;
+    }
+    #side-panel > div { flex: 1 1 240px; }
+    #telemetry-log { height: 120px; }
+  }
+</style>
+
+<div id="app">
+  <header id="topbar">
+    <h1>Fire Evacuation Router</h1>
+    <div class="stats">
+      <div class="stat">
+        <span class="label"><span class="conn-dot" id="conn-dot"></span>Link</span>
+        <span class="value" id="conn-status">Connecting</span>
+      </div>
+      <div class="stat">
+        <span class="label">Nodes online</span>
+        <span class="value" id="nodes-online">0 / 0</span>
+      </div>
+      <div class="stat">
+        <span class="label">Last recompute latency</span>
+        <span class="value" id="latency-last">--</span>
+      </div>
+      <div class="stat">
+        <span class="label">Worst observed</span>
+        <span class="value" id="latency-max">--</span>
+      </div>
+    </div>
+  </header>
+
+  <main id="main-layout">
+    <section id="grid-panel">
+      <svg id="grid-svg" viewBox="0 0 600 600" preserveAspectRatio="xMidYMid meet"></svg>
+    </section>
+
+    <aside id="side-panel">
+      <div id="selected-zone-block">
+        <h2>Selected zone</h2>
+        <div id="selected-zone-body">
+          <p class="no-selection">Click or focus a zone to inspect and trigger events.</p>
+        </div>
+      </div>
+
+      <div id="legend-block">
+        <h2>Legend</h2>
+        <div class="legend-row"><span class="swatch safe"></span>Safe / on route</div>
+        <div class="legend-row"><span class="swatch caution"></span>Caution / alternate route</div>
+        <div class="legend-row"><span class="swatch danger"></span>Danger / shelter-in-place</div>
+        <div class="legend-row"><span class="swatch structural"></span>No data yet</div>
+        <div class="legend-row"><span class="swatch degraded"></span>Degraded (stale sensor)</div>
+        <div class="legend-row"><span class="swatch offline"></span>Node offline</div>
+      </div>
+    </aside>
+  </main>
+
+  <footer id="telemetry-log">
+    <h2>Telemetry</h2>
+    <div id="log-lines"></div>
+  </footer>
+</div>
+
+<script>
+(function () {
+  "use strict";
+
+  const CELL = 100;
+  const RECT_INSET = 8;
+  const RECT_SIZE = CELL - RECT_INSET * 2;
+
+  const svg = document.getElementById("grid-svg");
+  const connDot = document.getElementById("conn-dot");
+  const connStatus = document.getElementById("conn-status");
+  const nodesOnlineEl = document.getElementById("nodes-online");
+  const latencyLastEl = document.getElementById("latency-last");
+  const latencyMaxEl = document.getElementById("latency-max");
+  const logLinesEl = document.getElementById("log-lines");
+  const selectedZoneBody = document.getElementById("selected-zone-body");
+
+  const SVG_NS = "http://www.w3.org/2000/svg";
+
+  let nodes = {};       // zone_id -> {id, row, col, is_exit}
+  let adjacency = {};   // zone_id -> [neighbor_zone_id, ...]
+  let exits = [];
+  let zoneState = {};   // zone_id -> {cost,color,direction,state,health,last_sensor}
+  let selectedZone = null;
+  let maxLatencyMs = 0;
+  let logLineCount = 0;
+  const MAX_LOG_LINES = 300;
+
+  const DIRECTION_DEG = { N: 0, E: 90, S: 180, W: 270 };
+
+  function el(tag, attrs) {
+    const e = document.createElementNS(SVG_NS, tag);
+    for (const k in attrs) e.setAttribute(k, attrs[k]);
+    return e;
+  }
+
+  function cellCenter(zone) {
+    const n = nodes[zone];
+    return { x: n.col * CELL + CELL / 2, y: n.row * CELL + CELL / 2 };
+  }
+
+  function edgeKey(u, v) {
+    return u < v ? `${u}|${v}` : `${v}|${u}`;
+  }
+
+  function buildGrid(graphData) {
+    graphData.nodes.forEach((n) => { nodes[n.id] = n; adjacency[n.id] = []; });
+    exits = graphData.exits;
+
+    graphData.edges.forEach((e) => {
+      adjacency[e.source].push(e.target);
+      adjacency[e.target].push(e.source);
+
+      const a = cellCenter(e.source);
+      const b = cellCenter(e.target);
+      const line = el("line", {
+        x1: a.x, y1: a.y, x2: b.x, y2: b.y,
+        class: "edge",
+        "data-edge": edgeKey(e.source, e.target),
+      });
+      svg.appendChild(line);
+    });
+
+    graphData.nodes.forEach((n) => {
+      const cx = n.col * CELL;
+      const cy = n.row * CELL;
+
+      const group = el("g", {
+        class: "zone-group",
+        tabindex: "0",
+        role: "button",
+        "aria-label": `Zone ${n.id}`,
+        "data-zone": n.id,
+      });
+
+      const rect = el("rect", {
+        x: cx + RECT_INSET, y: cy + RECT_INSET,
+        width: RECT_SIZE, height: RECT_SIZE,
+        class: "zone-rect",
+        "data-zone": n.id,
+      });
+      group.appendChild(rect);
+
+      if (n.is_exit) {
+        const pad = 3;
+        group.appendChild(el("rect", {
+          x: cx + RECT_INSET + pad, y: cy + RECT_INSET + pad,
+          width: RECT_SIZE - pad * 2, height: RECT_SIZE - pad * 2,
+          class: "zone-exit-mark",
+        }));
+      }
+
+      const arrow = el("polygon", {
+        points: `${cx + CELL / 2},${cy + CELL / 2 - 20} ${cx + CELL / 2 - 12},${cy + CELL / 2 + 8} ${cx + CELL / 2 + 12},${cy + CELL / 2 + 8}`,
+        class: "zone-arrow",
+        "data-zone": n.id,
+        style: "opacity:0",
+      });
+      group.appendChild(arrow);
+
+      const label = el("text", {
+        x: cx + RECT_INSET + 6, y: cy + RECT_INSET + 16,
+        class: "zone-label",
+      });
+      label.textContent = n.is_exit ? `${n.id} EXIT` : n.id;
+      group.appendChild(label);
+
+      const cost = el("text", {
+        x: cx + CELL / 2, y: cy + CELL - RECT_INSET - 10,
+        "text-anchor": "middle",
+        class: "zone-cost",
+        "data-zone": n.id,
+      });
+      cost.textContent = "--";
+      group.appendChild(cost);
+
+      group.addEventListener("click", () => selectZone(n.id));
+      group.addEventListener("keydown", (ev) => {
+        if (ev.key === "Enter" || ev.key === " ") {
+          ev.preventDefault();
+          selectZone(n.id);
+        }
+      });
+
+      svg.appendChild(group);
+    });
+  }
+
+  function selectZone(zoneId) {
+    if (selectedZone) {
+      const prev = svg.querySelector(`.zone-group[data-zone="${cssEscape(selectedZone)}"]`);
+      if (prev) prev.classList.remove("selected");
+    }
+    selectedZone = zoneId;
+    const g = svg.querySelector(`.zone-group[data-zone="${cssEscape(zoneId)}"]`);
+    if (g) { g.classList.add("selected"); g.focus({ preventScroll: true }); }
+    renderSelectedPanel();
+  }
+
+  function cssEscape(s) {
+    return window.CSS && CSS.escape ? CSS.escape(s) : s;
+  }
+
+  function renderSelectedPanel() {
+    if (!selectedZone) {
+      selectedZoneBody.innerHTML = '<p class="no-selection">Click or focus a zone to inspect and trigger events.</p>';
+      return;
+    }
+    const s = zoneState[selectedZone] || {};
+    const sensor = s.last_sensor || {};
+    const rows = [
+      ["Zone", selectedZone],
+      ["Cost", s.cost != null ? s.cost.toFixed(2) : "--"],
+      ["Color", s.color || "--"],
+      ["Direction", s.direction || "--"],
+      ["State", s.state || "--"],
+      ["Health", s.health || "unknown"],
+      ["Temp (C)", sensor.temp != null ? sensor.temp.toFixed(1) : "--"],
+      ["Smoke (ppm)", sensor.smoke != null ? sensor.smoke.toFixed(0) : "--"],
+      ["Flame", sensor.flame != null ? String(sensor.flame) : "--"],
+    ];
+    let html = rows.map(([k, v]) =>
+      `<div class="field-row"><span class="k">${k}</span><span class="v">${v}</span></div>`
+    ).join("");
+    html += `<div id="zone-controls">
+      <button id="btn-flashover">Trigger flashover</button>
+      <button id="btn-clear">Clear</button>
+    </div>`;
+    selectedZoneBody.innerHTML = html;
+
+    document.getElementById("btn-flashover").addEventListener("click", () => triggerZone(selectedZone, "flashover"));
+    document.getElementById("btn-clear").addEventListener("click", () => triggerZone(selectedZone, "clear"));
+  }
+
+  function triggerZone(zoneId, action) {
+    if (action === "flashover") ripple(zoneId);
+    fetch("/api/trigger", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ zone_id: zoneId, action: action }),
+    }).catch(() => appendLog(null, "system", `trigger request failed for ${zoneId}`, "danger"));
+  }
+
+  function pulseEdge(u, v, delayMs) {
+    setTimeout(() => {
+      const line = svg.querySelector(`[data-edge="${edgeKey(u, v)}"]`);
+      if (!line) return;
+      line.classList.remove("edge-pulse");
+      void line.offsetWidth;
+      line.classList.add("edge-pulse");
+    }, delayMs);
+  }
+
+  function flashCell(zoneId, delayMs) {
+    setTimeout(() => {
+      const rect = svg.querySelector(`rect.zone-rect[data-zone="${cssEscape(zoneId)}"]`);
+      if (!rect) return;
+      rect.classList.remove("cell-flash");
+      void rect.offsetWidth;
+      rect.classList.add("cell-flash");
+    }, delayMs);
+  }
+
+  function ripple(originZone, maxHops) {
+    maxHops = maxHops || 3;
+    const visited = new Set([originZone]);
+    let frontier = [originZone];
+    let hop = 0;
+    flashCell(originZone, 0);
+    while (frontier.length && hop < maxHops) {
+      const next = [];
+      frontier.forEach((z) => {
+        (adjacency[z] || []).forEach((n) => {
+          if (visited.has(n)) return;
+          visited.add(n);
+          next.push(n);
+          pulseEdge(z, n, hop * 150);
+          flashCell(n, hop * 150 + 100);
+        });
+      });
+      frontier = next;
+      hop++;
+    }
+  }
+
+  function updateZoneVisual(zoneId) {
+    const s = zoneState[zoneId];
+    if (!s) return;
+
+    const rect = svg.querySelector(`rect.zone-rect[data-zone="${cssEscape(zoneId)}"]`);
+    const arrow = svg.querySelector(`polygon.zone-arrow[data-zone="${cssEscape(zoneId)}"]`);
+    const costText = svg.querySelector(`text.zone-cost[data-zone="${cssEscape(zoneId)}"]`);
+
+    if (rect) {
+      rect.classList.remove("color-green", "color-yellow", "color-red", "health-degraded", "health-offline", "pulsing");
+      if (s.color === "green") rect.classList.add("color-green");
+      else if (s.color === "yellow") rect.classList.add("color-yellow");
+      else if (s.color === "red") rect.classList.add("color-red");
+
+      if (s.color === "red" && s.state === "normal") rect.classList.add("pulsing");
+
+      if (s.health === "degraded") rect.classList.add("health-degraded");
+      else if (s.health === "offline") rect.classList.add("health-offline");
+    }
+
+    if (arrow) {
+      if (s.direction && DIRECTION_DEG[s.direction] !== undefined) {
+        arrow.style.opacity = "1";
+        arrow.style.transform = `rotate(${DIRECTION_DEG[s.direction]}deg)`;
+      } else {
+        arrow.style.opacity = "0";
+      }
+    }
+
+    if (costText) {
+      costText.textContent = s.cost != null ? s.cost.toFixed(1) : "--";
+    }
+
+    if (selectedZone === zoneId) renderSelectedPanel();
+  }
+
+  function ensureZoneState(zoneId) {
+    if (!zoneState[zoneId]) {
+      zoneState[zoneId] = { cost: null, color: null, direction: null, state: null, health: "unknown", last_sensor: null };
+    }
+    return zoneState[zoneId];
+  }
+
+  function updateNodesOnlineStat() {
+    const total = Object.keys(nodes).length;
+    let onlineCount = 0;
+    for (const z in zoneState) {
+      if (zoneState[z].health === "ok") onlineCount++;
+    }
+    nodesOnlineEl.textContent = `${onlineCount} / ${total}`;
+  }
+
+  function severityFor(event) {
+    if (event.type === "hazard") {
+      if (event.cost >= 1000) return "danger";
+      if (event.cost > 5) return "caution";
+      return "safe";
+    }
+    if (event.type === "led") {
+      if (event.color === "red") return "danger";
+      if (event.color === "yellow") return "caution";
+      if (event.color === "green") return "safe";
+    }
+    if (event.type === "health") {
+      if (event.state === "offline") return "danger";
+      if (event.state === "degraded") return "caution";
+      return "safe";
+    }
+    if (event.type === "sensor") {
+      return event.flame ? "danger" : "dim";
+    }
+    return "neutral";
+  }
+
+  function appendLog(zoneId, type, detail, sev) {
+    const line = document.createElement("div");
+    line.className = `log-line sev-${sev || "neutral"}`;
+    const t = new Date().toISOString().substr(11, 12);
+    line.innerHTML = `<span class="ts">[${t}]</span> ${zoneId ? zoneId.padEnd(6) : "system".padEnd(6)} ${type.padEnd(8)} ${detail}`;
+    logLinesEl.appendChild(line);
+    logLineCount++;
+    if (logLineCount > MAX_LOG_LINES) {
+      logLinesEl.removeChild(logLinesEl.firstChild);
+    }
+    logLinesEl.scrollTop = logLinesEl.scrollHeight;
+  }
+
+  function handleEvent(event) {
+    const zoneId = event.zone_id;
+    if (!zoneId || !nodes[zoneId]) return;
+    const s = ensureZoneState(zoneId);
+    const sev = severityFor(event);
+
+    if (event.type === "hazard") {
+      const prevCost = s.cost;
+      s.cost = event.cost;
+      appendLog(zoneId, "hazard", `cost=${event.cost.toFixed(2)}`, sev);
+      if (prevCost != null && event.cost > prevCost * 1.5 && event.cost > 5) {
+        ripple(zoneId);
+      }
+    } else if (event.type === "led") {
+      s.color = event.color;
+      s.direction = event.direction;
+      s.state = event.state;
+      appendLog(zoneId, "led", `color=${event.color} dir=${event.direction || "-"} state=${event.state}`, sev);
+      if (event.src_ts) {
+        const latencyMs = (event.ts - event.src_ts) * 1000;
+        latencyLastEl.textContent = `${latencyMs.toFixed(0)} ms`;
+        if (latencyMs > maxLatencyMs) {
+          maxLatencyMs = latencyMs;
+          latencyMaxEl.textContent = `${maxLatencyMs.toFixed(0)} ms`;
+        }
+      }
+    } else if (event.type === "health") {
+      s.health = event.state;
+      appendLog(zoneId, "health", `state=${event.state}`, sev);
+      updateNodesOnlineStat();
+    } else if (event.type === "sensor") {
+      s.last_sensor = { temp: event.temp, smoke: event.smoke, flame: event.flame };
+      appendLog(zoneId, "sensor", `temp=${event.temp.toFixed(1)} smoke=${event.smoke.toFixed(0)} flame=${event.flame}`, sev);
+    }
+
+    updateZoneVisual(zoneId);
+  }
+
+  function connectEvents() {
+    const es = new EventSource("/api/events");
+    es.onopen = () => {
+      connDot.className = "conn-dot connected";
+      connStatus.textContent = "Connected";
+    };
+    es.onerror = () => {
+      connDot.className = "conn-dot disconnected";
+      connStatus.textContent = "Reconnecting";
+    };
+    es.onmessage = (msg) => {
+      try {
+        handleEvent(JSON.parse(msg.data));
+      } catch (e) { /* ignore malformed event */ }
+    };
+  }
+
+  function loadInitialState() {
+    fetch("/api/state").then((r) => r.json()).then((data) => {
+      Object.keys(data.zones).forEach((zoneId) => {
+        const z = data.zones[zoneId];
+        zoneState[zoneId] = {
+          cost: z.cost, color: z.color, direction: z.direction,
+          state: z.state, health: z.health, last_sensor: z.last_sensor,
+        };
+        updateZoneVisual(zoneId);
+      });
+      updateNodesOnlineStat();
+    });
+  }
+
+  fetch("/api/graph").then((r) => r.json()).then((graphData) => {
+    buildGrid(graphData);
+    loadInitialState();
+    connectEvents();
+  });
+})();
+</script>
