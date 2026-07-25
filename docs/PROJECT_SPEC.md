@@ -20,17 +20,30 @@ to guide occupants away from active hazards.
         |
         v
 [Fire Node processes] (one Python process per zone, simulates an MCU)
-   - subscribes to its own zone's sensor topic + ALL nodes' hazard topics
-     (`fire/nodes/+/hazard`) — global Dijkstra needs the global hazard vector,
-     neighbor-only state is insufficient (see Pathfinding)
-   - runs sensor fusion (see formula below)
-   - runs Dijkstra/A* pathfinding on the building graph
-   - publishes: (a) its own hazard cost, (b) computed LED state/path
+   - subscribes to its own zone's sensor topic only
+   - runs sensor fusion (see formula below), publishes its own hazard cost
+   - subscribes to fire/system/routing (the coordinator's broadcast, below)
+   - applies local hysteresis + LED color logic, publishes its own LED state
+        |
+        v
+[Routing Coordinator process] (single instance, elected/centralized)
+   - subscribes to ALL nodes' hazard topics (`fire/nodes/+/hazard`) — a
+     global Dijkstra needs the global hazard vector, so this state has to
+     live somewhere; centralizing it here means it's built ONCE, not once
+     per zone (see Pathfinding — this was the source of a real O(zones^2)
+     recompute bug caught during live testing)
+   - runs ONE reverse multi-source Dijkstra from the exits per hazard update
+   - publishes the full field (hazard vector + dist-to-exit + next-hop for
+     every zone) to fire/system/routing
         |
         v
 [Node-RED Dashboard] subscribes to all node topics, renders 2D floor grid,
    live hazard heatmap, current exit paths, system health
 ```
+
+For a single-process demo, `node/run_all_nodes.py` hosts the coordinator and
+all 36 FireNode instances as threads in one process; each still has its own
+MQTT client/client_id, so the topic design below is unchanged either way.
 
 ## Building layout
 - 6x6 grid graph (networkx), each cell = one "zone" = one simulated node
@@ -46,9 +59,20 @@ to guide occupants away from active hazards.
   Fail-safe — without the tick every quiet zone would self-report as degraded).
 - `fire/nodes/{zone_id}/hazard` — each node publishes its computed zone cost
   after fusion: `{"cost": float, "ts": epoch}`
-  QoS 1, **retained**. Retention matters: a node that starts late (or restarts)
-  must inherit the current hazard picture from the broker, otherwise it computes
-  its first paths against an all-clear graph and emits a wrong LED state.
+  QoS 1, **retained**. Subscribed ONLY by the routing coordinator
+  (`fire/nodes/+/hazard`), not by other zone nodes — see Architecture.
+  Retention matters: a coordinator that starts late (or restarts) must
+  inherit the current hazard picture from the broker rather than solving
+  against an all-clear graph.
+- `fire/system/routing` — the coordinator publishes the full computed field
+  after every hazard update:
+  `{"hazard_costs": {zone_id: float}, "dist_to_exit": {zone_id: float|null},
+    "next_hop": {zone_id: str|null}, "src_ts": epoch, "ts": epoch}`
+  QoS 1, retained. `null` in `dist_to_exit`/`next_hop` means no route to any
+  exit (shelter-in-place). Every FireNode subscribes to this single topic;
+  none of them solve the graph themselves. `src_ts` is the `ts` of whichever
+  hazard update triggered this recompute, carried through from the original
+  sensor reading for end-to-end latency measurement (see Pathfinding).
 - `fire/nodes/{zone_id}/led` — each node publishes its LED state:
   `{"color": "green"|"yellow"|"red", "direction": "N"|"S"|"E"|"W"|null,
     "src_ts": epoch, "ts": epoch}`
@@ -117,7 +141,8 @@ path: every zone always displays the correct direction for anyone standing in
 it. (This is why no occupant topic exists in the MQTT design — the routing
 field is computed for all zones at once.)
 
-**Recompute strategy: recompute the whole field, every time.**
+**Recompute strategy: recompute the whole field, every time — but ONCE,
+centrally, not once per zone.**
 
 The graph is 36 nodes / ~60 edges. A full Dijkstra over it is on the order of
 100 microseconds in networkx — three orders of magnitude inside the 300 ms
@@ -130,7 +155,25 @@ cannot be identified without recomputing — and when a cost *falls* (suppressio
 sensor clearing), that zone becomes newly attractive to routes that never
 touched it at all. Correct incremental recomputation requires D*Lite / LPA*,
 which is not worth the implementation risk here. Full recompute is simpler,
-provably correct, and comfortably fast enough.
+provably correct, and comfortably fast enough — **provided it happens once per
+hazard update, not once per (hazard update × zone) pair.**
+
+An earlier revision had every FireNode subscribe to `fire/nodes/+/hazard` and
+recompute independently on each delivery. That is O(zones) work multiplied by
+O(zones) subscribers = O(zones^2) recomputes per tick — 1296 redundant graph
+solves per ambient tick at 36 zones, not 36. Running all 36 as threads in one
+process (`run_all_nodes.py`) made this worse: they share one GIL, so what
+should be ~100µs of work each became seconds of serialized backlog, observed
+live as 1999ms typical / 3898ms worst-case recompute latency, and as zones
+displaying stale hazard costs from readings that had already been superseded
+but were still queued behind the backlog. The fix: a single `RoutingCoordinator`
+process (`node/routing_coordinator.py`) owns the global hazard vector, is the
+only subscriber to `fire/nodes/+/hazard`, and is the only thing that ever
+calls `compute_routing()`. It broadcasts the full field on `fire/system/routing`;
+FireNode instances subscribe to that single topic and do O(1) work per update
+(hysteresis + color + their own LED publish), never solving the graph
+themselves. This is the "single elected/coordinator node" variant the
+Architecture section describes above.
 
 **Latency instrumentation (the 300 ms claim must be demonstrable).**
 The injector stamps `ts` on each sensor payload. That value is carried through
