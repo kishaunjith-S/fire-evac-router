@@ -1,0 +1,35 @@
+{
+  "version": 1,
+  "author": "Kishaunjith S",
+  "editor": "wokwi",
+  "parts": [
+    { "type": "board-esp32-devkit-c-v4", "id": "esp", "top": 0, "left": 0, "attrs": {} },
+    { "type": "wokwi-dht22", "id": "dht1", "top": -18.9, "left": -280, "attrs": {} },
+    { "type": "wokwi-potentiometer", "id": "pot1", "top": 200, "left": -280, "attrs": {} },
+    {
+      "type": "wokwi-pushbutton",
+      "id": "btn1",
+      "top": -100,
+      "left": 350,
+      "attrs": { "color": "green" }
+    },
+    { "type": "wokwi-rgb-led", "id": "rgb1", "top": 150, "left": 350, "attrs": {} }
+  ],
+  "connections": [
+    [ "esp:TX", "$serialMonitor:RX", "", [] ],
+    [ "esp:RX", "$serialMonitor:TX", "", [] ],
+    [ "dht1:VCC", "esp:3V3", "red", [ "v0" ] ],
+    [ "dht1:GND", "esp:GND.1", "black", [ "v0" ] ],
+    [ "dht1:SDA", "esp:4", "green", [ "v0" ] ],
+    [ "pot1:VCC", "esp:3V3", "red", [ "v0" ] ],
+    [ "pot1:GND", "esp:GND.1", "black", [ "v0" ] ],
+    [ "pot1:SIG", "esp:34", "green", [ "v0" ] ],
+    [ "btn1:1.l", "esp:5", "green", [ "h0" ] ],
+    [ "btn1:2.l", "esp:GND.2", "green", [ "h0" ] ],
+    [ "rgb1:R", "esp:25", "green", [ "v0" ] ],
+    [ "rgb1:B", "esp:27", "green", [ "v0" ] ],
+    [ "rgb1:G", "esp:26", "green", [ "v0" ] ],
+    [ "rgb1:COM", "esp:3V3", "green", [ "v0" ] ]
+  ],
+  "dependencies": {}
+}
