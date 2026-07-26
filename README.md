@@ -69,12 +69,13 @@ fire-evac-router/
 │   ├── fire_node.py           Per-zone node: sensors -> LED decision
 │   └── run_all_nodes.py       Runs coordinator + all 36 zone nodes together
 ├── dashboard/                 Node-RED flow (Fire Commander Dashboard)
+├── firmware_wokwi/            ESP32 firmware port (Arduino C++) + Wokwi diagram
 ├── docs/
 │   ├── PROJECT_SPEC.md            Full architecture & requirements spec
 │   ├── latency_debugging_notes.md Post-mortem: two real bugs found & fixed
 │   ├── DEMO_RUNBOOK.md             Startup sequence, demo script, troubleshooting
-│   ├── engineering_report.md      (pending)
-│   └── pitch_deck.pptx            (pending)
+│   ├── Engineering_Report.pdf     Formal engineering report
+│   └── Fire_Evacuation_Router_Pitch_Deck_Formal.pptx
 └── requirements.txt
 ```
 
@@ -143,9 +144,19 @@ time constraints, rather than left as silent gaps:
 - **Dataset-calibrated fusion constants** — the fusion formula's
   coefficients were manually tuned for demo purposes rather than fitted
   against NIST/Kaggle fire datasets as the spec suggests is possible.
-- **Physical hardware / Wokwi firmware port** — this build is fully
-  simulated by design; see the architecture note above on why porting to
-  real ESP32 hardware would be a low-friction next step, not a redesign.
+
+**Wokwi ESP32 firmware port — completed as a stretch goal.** The core
+sensor-fusion formula (temperature, smoke, flame -> hazard cost -> LED
+color) was ported to Arduino C++ and validated running live against a
+simulated ESP32, DHT22, potentiometer (smoke stand-in), pushbutton
+(flame stand-in), and RGB LED. This demonstrates the same formula used
+in `node/routing_common.py` running as real firmware, not just claimed
+as "hardware-ready" in the abstract. Live simulation:
+[wokwi.com/projects/470617448491375617](https://wokwi.com/projects/470617448491375617).
+Source: `firmware_wokwi/`. Note this single-node demo does not
+implement MQTT, multi-node coordination, or Dijkstra routing — those
+remain demonstrated only in the full Python-based system described
+above.
 
 ---
 
@@ -158,5 +169,6 @@ time constraints, rather than left as silent gaps:
 - [x] Multi-node MQTT communication (retained topics, LWT, QoS)
 - [x] Audible + visual distress alarm
 - [x] Fire Commander Dashboard (Node-RED)
-- [ ] Engineering report
-- [ ] Pitch deck
+- [x] Wokwi ESP32 firmware port (sensor fusion validated on simulated hardware)
+- [x] Engineering report
+- [x] Pitch deck
